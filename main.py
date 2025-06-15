@@ -7,6 +7,8 @@ from datetime import datetime
 
 from utils.xml_generator import generate_invoice_xml
 from utils.pdf_export import export_invoice_pdf
+from utils.excel_export import export_invoice_excel
+
 
 
 # --- Setup Window ---
@@ -23,6 +25,18 @@ canvas.configure(yscrollcommand=scroll_y.set)
 canvas.pack(side="left", fill="both", expand=True)
 scroll_y.pack(side="right", fill="y")
 canvas.create_window((0, 0), window=frame, anchor='nw')
+
+# Enable 2-finger scroll on macOS and wheel scroll on Windows/Linux
+def _on_mousewheel(event):
+    if event.num == 4 or event.delta > 0:
+        canvas.yview_scroll(-1, "units")
+    elif event.num == 5 or event.delta < 0:
+        canvas.yview_scroll(1, "units")
+
+canvas.bind_all("<MouseWheel>", _on_mousewheel)       # Windows
+canvas.bind_all("<Button-4>", _on_mousewheel)          # macOS Up
+canvas.bind_all("<Button-5>", _on_mousewheel)          # macOS Down
+
 
 def on_frame_configure(event):
     canvas.configure(scrollregion=canvas.bbox("all"))
@@ -139,11 +153,19 @@ def export_pdf():
     data = {k: v.get() for k, v in fields.items()}
     filename = export_invoice_pdf(data)
     messagebox.showinfo("Exported", f"PDF invoice saved to:\n{filename}")
+    
+def export_excel():
+    data = {k: v.get() for k, v in fields.items()}
+    filename = export_invoice_excel(data)
+    messagebox.showinfo("Exported", f"Excel invoice saved to:\n{filename}")
+
 
 # --- Buttons ---
 tk.Button(frame, text="💾 Save Invoice", command=save_invoice, width=20).grid(row=62, column=0, pady=20)
 tk.Button(frame, text="📤 Submit Invoice", command=submit_invoice, width=20).grid(row=62, column=1)
 tk.Button(frame, text="🧾 Export XML", command=export_xml, width=20).grid(row=63, column=0)
 tk.Button(frame, text="🖨️ Export PDF", command=export_pdf, width=20).grid(row=63, column=1)
+tk.Button(frame, text="📊 Export Excel", command=export_excel, width=20).grid(row=64, column=0)
+
 
 root.mainloop()
