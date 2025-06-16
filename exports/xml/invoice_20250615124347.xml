@@ -1,0 +1,1 @@
+<Invoice><Supplier><Name>ALi basha</Name><TIN>1234567890123</TIN><ID>710150161514</ID></Supplier><Buyer><Name /><TIN /><ID /></Buyer><InvoiceDetails><InvoiceNumber>1</InvoiceNumber><DateTime>15/06/2025 12:43:47</DateTime><Currency>MYR</Currency><TotalAmount /></InvoiceDetails><TaxDetails><TaxType>02</TaxType><TaxRate /><TaxAmount /></TaxDetails></Invoice>

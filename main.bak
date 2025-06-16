@@ -1,0 +1,197 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import json, os
+from datetime import datetime
+import requests
+from auth import get_token
+from utils.xml_generator import generate_invoice_xml
+from utils.pdf_export import export_invoice_pdf
+from utils.excel_export import export_invoice_excel
+from utils.validation import *
+
+root = tk.Tk()
+root.title("Malaysia e-Invoice System")
+root.geometry("1500x900")
+
+canvas = tk.Canvas(root)
+scroll_y = tk.Scrollbar(root, orient="vertical", command=canvas.yview)
+frame = tk.Frame(canvas)
+canvas.configure(yscrollcommand=scroll_y.set)
+canvas.pack(side="left", fill="both", expand=True)
+scroll_y.pack(side="right", fill="y")
+canvas.create_window((0, 0), window=frame, anchor='nw')
+
+def _on_mousewheel(event):
+    canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+
+canvas.bind_all("<MouseWheel>", _on_mousewheel)
+def on_frame_configure(event): canvas.configure(scrollregion=canvas.bbox("all"))
+frame.bind("<Configure>", on_frame_configure)
+
+fields = {}
+
+def add_field(parent, label, row, col=0, width=30, field_name=None, options=None, tooltip=None, required=False):
+    font = ("Arial", 10, "bold italic") if required else None
+    tk.Label(parent, text=label, font=font).grid(row=row, column=col, padx=5, pady=3, sticky='e')
+    if options:
+        var = tk.StringVar()
+        entry = ttk.Combobox(parent, textvariable=var, values=options, width=width-2, state="readonly")
+    else:
+        entry = tk.Entry(parent, width=width)
+    entry.grid(row=row, column=col + 1, pady=3, sticky='w')
+    if tooltip:
+        tk.Label(parent, text=tooltip, fg="gray", font=("Arial", 7)).grid(row=row + 1, column=col + 1, sticky='w')
+    if field_name:
+        fields[field_name] = entry
+    return entry
+
+# --- 4 Columns ---
+col1 = tk.Frame(frame); col2 = tk.Frame(frame); col3 = tk.Frame(frame); col4 = tk.Frame(frame)
+for i, col in enumerate([col1, col2, col3, col4]):
+    col.grid(row=0, column=i, sticky="nw", padx=20, pady=10)
+
+# --- Column 1: Supplier + Buyer ---
+tk.Label(col1, text="--- Supplier Details ---", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2)
+add_field(col1, "Supplier Name", 1, field_name="supplier_name", required=True)
+add_field(col1, "Supplier TIN", 2, field_name="supplier_tin", required=True)
+add_field(col1, "Supplier ID/Passport", 3, field_name="supplier_id")
+add_field(col1, "SST Reg. Number", 4, field_name="supplier_sst")
+add_field(col1, "Tourism Tax Reg. Number", 5, field_name="supplier_tourism_tax")
+add_field(col1, "Supplier Email", 6, field_name="supplier_email", required=True)
+add_field(col1, "MSIC Code", 7, field_name="supplier_msic", required=True)
+add_field(col1, "Business Activity", 8, field_name="supplier_activity")
+add_field(col1, "Supplier Address", 9, field_name="supplier_address", required=True)
+add_field(col1, "Supplier Phone", 10, field_name="supplier_phone")
+
+tk.Label(col1, text="--- Buyer Details ---", font=("Arial", 12, "bold")).grid(row=12, column=0, columnspan=2, pady=10)
+add_field(col1, "Buyer Name", 13, field_name="buyer_name", required=True)
+add_field(col1, "Buyer TIN", 14, field_name="buyer_tin", required=True)
+add_field(col1, "Buyer ID/Passport", 15, field_name="buyer_id")
+add_field(col1, "Buyer SST Reg. Number", 16, field_name="buyer_sst")
+add_field(col1, "Buyer Email", 17, field_name="buyer_email")
+add_field(col1, "Buyer Address", 18, field_name="buyer_address")
+add_field(col1, "Buyer Phone", 19, field_name="buyer_phone")
+
+# --- Column 2: Product/Service ---
+tk.Label(col2, text="--- Product/Service ---", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2)
+add_field(col2, "Classification Code", 1, field_name="classification", required=True)
+add_field(col2, "Product Description", 2, field_name="product_description", required=True)
+add_field(col2, "Unit Price", 3, field_name="unit_price", required=True)
+add_field(col2, "Tax Type", 4, field_name="tax_type", options=["01", "02", "03"], required=True)
+add_field(col2, "Tax Rate", 5, field_name="tax_rate", required=True)
+add_field(col2, "Tax Amount", 6, field_name="tax_amount", required=True)
+add_field(col2, "Exemption Details", 7, field_name="tax_exemption")
+add_field(col2, "Amount Exempted", 8, field_name="amount_exempted")
+add_field(col2, "Subtotal", 9, field_name="subtotal", required=True)
+add_field(col2, "Total Excl. Tax", 10, field_name="total_excl_tax", required=True)
+add_field(col2, "Total Incl. Tax", 11, field_name="total_incl_tax", required=True)
+add_field(col2, "Total Net Amount", 12, field_name="total_net")
+add_field(col2, "Total Payable", 13, field_name="total_payable", required=True)
+add_field(col2, "Rounding Amount", 14, field_name="rounding")
+add_field(col2, "Total Taxable Amount", 15, field_name="taxable_per_type")
+add_field(col2, "Quantity", 16, field_name="quantity")
+add_field(col2, "Measurement", 17, field_name="measurement")
+add_field(col2, "Discount Rate", 18, field_name="discount_rate")
+add_field(col2, "Discount Amount", 19, field_name="discount_amount")
+add_field(col2, "Fee/Charge Rate", 20, field_name="fee_rate")
+
+# --- Column 3: Invoice + Payment Info ---
+tk.Label(col3, text="--- Invoice Details ---", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2)
+add_field(col3, "Invoice Version", 1, field_name="version", required=True)
+add_field(col3, "Invoice Type", 2, field_name="type", options=["01", "02", "03", "04"], required=True)
+add_field(col3, "Invoice Number", 3, field_name="invoice_number", required=True)
+add_field(col3, "Original Ref Number", 4, field_name="original_ref")
+add_field(col3, "Date & Time", 5, field_name="datetime", required=True, tooltip="dd/mm/yyyy HH:MM:SS")
+add_field(col3, "Currency Code", 6, field_name="currency", options=["MYR", "USD", "EUR", "JPY"], required=True)
+add_field(col3, "Exchange Rate", 7, field_name="exchange_rate")
+add_field(col3, "Billing Frequency", 8, field_name="billing_frequency", options=["01", "02", "03", "04", "05", "06", "07", "08", "09"])
+add_field(col3, "Billing Period", 9, field_name="billing_period")
+
+tk.Label(col3, text="--- Payment Info ---", font=("Arial", 12, "bold")).grid(row=11, column=0, columnspan=2, pady=(20, 5))
+add_field(col3, "Payment Mode", 12, field_name="payment_mode")
+add_field(col3, "Bank Account", 13, field_name="bank_account")
+add_field(col3, "Payment Terms", 14, field_name="payment_terms")
+add_field(col3, "Prepayment Amount", 15, field_name="prepayment_amount")
+add_field(col3, "Prepayment Date", 16, field_name="prepayment_date")
+add_field(col3, "Prepayment Ref", 17, field_name="prepayment_ref")
+add_field(col3, "Bill Ref Number", 18, field_name="bill_ref")
+
+# --- Column 4: Buttons ---
+tk.Label(col4, text="--- Actions ---", font=("Arial", 12, "bold")).grid(row=0, column=0, pady=10)
+
+def validate_fields():
+    errors = []
+    required_keys = [k for k, v in fields.items() if v.cget("font") == ("Arial", 10, "bold italic")]
+    for key in required_keys:
+        val = fields[key].get()
+        if not is_required(val):
+            errors.append(f"{key.replace('_', ' ').title()} is required.")
+    if not is_valid_tin(fields["supplier_tin"].get()):
+        errors.append("Supplier TIN must be 13 alphanumeric.")
+    if not is_valid_email(fields["supplier_email"].get()):
+        errors.append("Invalid supplier email.")
+    if not is_valid_msic(fields["supplier_msic"].get()):
+        errors.append("MSIC code must be 5 digits.")
+    if not is_valid_invoice_type(fields["type"].get()):
+        errors.append("Invalid Invoice Type.")
+    if not is_valid_currency(fields["currency"].get()):
+        errors.append("Invalid Currency Code.")
+    if not is_valid_tax_type(fields["tax_type"].get()):
+        errors.append("Invalid Tax Type.")
+    return errors
+
+def save_invoice():
+    errors = validate_fields()
+    if errors:
+        messagebox.showerror("Validation Failed", "\n".join(errors))
+        return
+    data = {k: v.get() for k, v in fields.items()}
+    os.makedirs("invoices", exist_ok=True)
+    filename = f"invoices/invoice-{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=4)
+    messagebox.showinfo("Saved", f"Invoice saved to:\n{filename}")
+
+def submit_invoice():
+    errors = validate_fields()
+    if errors:
+        messagebox.showerror("Validation Failed", "\n".join(errors))
+        return
+    data = {k: v.get() for k, v in fields.items()}
+    try:
+        token = get_token(data["supplier_tin"])
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        response = requests.post("http://localhost:5000/submit", json=data, headers=headers)
+        if response.status_code == 200:
+            messagebox.showinfo("Submitted", "Invoice submitted successfully.")
+        else:
+            messagebox.showerror("Server Error", f"Status: {response.status_code}\n{response.text}")
+    except Exception as e:
+        messagebox.showerror("Submit Failed", str(e))
+
+def export_xml():
+    data = {k: v.get() for k, v in fields.items()}
+    xml = generate_invoice_xml(data)
+    os.makedirs("exports/xml", exist_ok=True)
+    filename = f"exports/xml/invoice_{datetime.now().strftime('%Y%m%d%H%M%S')}.xml"
+    with open(filename, "w") as f:
+        f.write(xml)
+    messagebox.showinfo("Exported", f"XML saved to:\n{filename}")
+
+def export_pdf():
+    data = {k: v.get() for k, v in fields.items()}
+    filename = export_invoice_pdf(data)
+    messagebox.showinfo("Exported", f"PDF saved to:\n{filename}")
+
+def export_excel():
+    data = {k: v.get() for k, v in fields.items()}
+    filename = export_invoice_excel(data)
+    messagebox.showinfo("Exported", f"Excel saved to:\n{filename}")
+
+tk.Button(col4, text="💾 Save Invoice", command=save_invoice, width=25).grid(row=1, column=0, pady=5)
+tk.Button(col4, text="📤 Submit Invoice", command=submit_invoice, width=25).grid(row=2, column=0, pady=5)
+tk.Button(col4, text="🧾 Export XML", command=export_xml, width=25).grid(row=3, column=0, pady=5)
+tk.Button(col4, text="🖨️ Export PDF", command=export_pdf, width=25).grid(row=4, column=0, pady=5)
+tk.Button(col4, text="📊 Export Excel", command=export_excel, width=25).grid(row=5, column=0, pady=5)
+
+root.mainloop()

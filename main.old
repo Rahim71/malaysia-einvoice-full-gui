@@ -1,0 +1,159 @@
+import tkinter as tk
+from tkinter import messagebox, ttk
+import json
+import os
+from datetime import datetime
+
+from utils.xml_generator import generate_invoice_xml
+from utils.pdf_export import export_invoice_pdf
+from utils.excel_export import export_invoice_excel
+from utils.validation import (
+    is_valid_tin, is_valid_email, is_valid_msic, is_valid_currency,
+    is_valid_invoice_type, is_valid_tax_type, is_required
+)
+
+root = tk.Tk()
+root.title("Malaysia e-Invoice System")
+root.geometry("1400x850")
+
+canvas = tk.Canvas(root)
+scroll_y = tk.Scrollbar(root, orient="vertical", command=canvas.yview)
+frame = tk.Frame(canvas)
+canvas.configure(yscrollcommand=scroll_y.set)
+canvas.pack(side="left", fill="both", expand=True)
+scroll_y.pack(side="right", fill="y")
+canvas.create_window((0, 0), window=frame, anchor='nw')
+
+def _on_mousewheel(event):
+    if event.num == 4 or event.delta > 0:
+        canvas.yview_scroll(-1, "units")
+    elif event.num == 5 or event.delta < 0:
+        canvas.yview_scroll(1, "units")
+
+canvas.bind_all("<MouseWheel>", _on_mousewheel)
+canvas.bind_all("<Button-4>", _on_mousewheel)
+canvas.bind_all("<Button-5>", _on_mousewheel)
+
+def on_frame_configure(event):
+    canvas.configure(scrollregion=canvas.bbox("all"))
+
+frame.bind("<Configure>", on_frame_configure)
+
+fields = {}
+
+def add_field(parent, label, row, col=0, width=30, field_name=None, options=None, tooltip=None):
+    tk.Label(parent, text=label).grid(row=row, column=col, padx=5, pady=3, sticky='e')
+    if options:
+        var = tk.StringVar()
+        entry = ttk.Combobox(parent, textvariable=var, values=options, width=width-2, state="readonly")
+    else:
+        entry = tk.Entry(parent, width=width)
+    entry.grid(row=row, column=col + 1, pady=3, sticky='w')
+
+    if tooltip:
+        tk.Label(parent, text=tooltip, fg="gray", font=("Arial", 7)).grid(row=row + 1, column=col + 1, sticky='w')
+
+    if field_name:
+        fields[field_name] = entry
+    return entry
+
+# --- Columns
+col1 = tk.Frame(frame)
+col2 = tk.Frame(frame)
+col3 = tk.Frame(frame)
+col1.grid(row=0, column=0, sticky="nw", padx=20, pady=10)
+col2.grid(row=0, column=1, sticky="nw", padx=20, pady=10)
+col3.grid(row=0, column=2, sticky="nw", padx=20, pady=10)
+
+# --- Column 1
+tk.Label(col1, text="--- Supplier Details ---", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2)
+add_field(col1, "Supplier Name", 1, field_name="supplier_name")
+add_field(col1, "Supplier TIN", 2, field_name="supplier_tin", tooltip="13 alphanumeric characters")
+add_field(col1, "Supplier Email", 3, field_name="supplier_email", tooltip="Valid email format")
+add_field(col1, "MSIC Code", 4, field_name="supplier_msic", tooltip="5-digit code (e.g. 10712)")
+
+tk.Label(col1, text="--- Buyer Details ---", font=("Arial", 12, "bold")).grid(row=6, column=0, columnspan=2)
+add_field(col1, "Buyer Name", 7, field_name="buyer_name")
+add_field(col1, "Buyer TIN", 8, field_name="buyer_tin")
+
+tk.Label(col1, text="--- Invoice ---", font=("Arial", 12, "bold")).grid(row=10, column=0, columnspan=2)
+add_field(col1, "Invoice Number", 11, field_name="invoice_number")
+add_field(col1, "Invoice Type", 12, field_name="type", options=["01", "02", "03", "04"],
+          tooltip="01: Invoice, 02: Credit Note, etc.")
+add_field(col1, "Currency Code", 13, field_name="currency", options=["MYR", "USD", "EUR", "JPY"])
+
+# --- Column 2
+tk.Label(col2, text="--- Tax Info ---", font=("Arial", 12, "bold")).grid(row=0, column=0, columnspan=2)
+add_field(col2, "Tax Type", 1, field_name="tax_type", options=["01", "02", "03"],
+          tooltip="01: Sales, 02: Service, 03: Tourism")
+add_field(col2, "Tax Rate", 2, field_name="tax_rate")
+add_field(col2, "Tax Amount", 3, field_name="tax_amount")
+
+add_field(col2, "Total Payable", 4, field_name="total_payable")
+add_field(col2, "Date & Time", 5, field_name="datetime", tooltip="Format: dd/mm/yyyy HH:MM:SS")
+
+# --- Column 3
+def validate_fields():
+    errors = []
+    if not is_required(fields["invoice_number"].get()):
+        errors.append("Invoice number is required.")
+    if not is_valid_tin(fields["supplier_tin"].get()):
+        errors.append("Supplier TIN must be 13 alphanumeric characters.")
+    if not is_valid_email(fields["supplier_email"].get()):
+        errors.append("Supplier email is invalid.")
+    if not is_valid_msic(fields["supplier_msic"].get()):
+        errors.append("MSIC code must be 5 digits.")
+    if not is_valid_currency(fields["currency"].get()):
+        errors.append("Invalid currency code.")
+    if not is_valid_invoice_type(fields["type"].get()):
+        errors.append("Invalid invoice type.")
+    if not is_valid_tax_type(fields["tax_type"].get()):
+        errors.append("Invalid tax type.")
+    return errors
+
+def save_invoice():
+    errors = validate_fields()
+    if errors:
+        messagebox.showerror("Validation Failed", "\n".join(errors))
+        return
+    data = {k: v.get() for k, v in fields.items()}
+    os.makedirs("invoices", exist_ok=True)
+    filename = f"invoices/invoice-{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=4)
+    messagebox.showinfo("Saved", f"Invoice saved to:\n{filename}")
+
+def submit_invoice():
+    messagebox.showinfo("Submit", "This would POST to IRBM or dummy server.")
+
+def export_xml():
+    errors = validate_fields()
+    if errors:
+        messagebox.showerror("Validation Failed", "\n".join(errors))
+        return
+    data = {k: v.get() for k, v in fields.items()}
+    xml = generate_invoice_xml(data)
+    os.makedirs("exports/xml", exist_ok=True)
+    filename = f"exports/xml/invoice_{datetime.now().strftime('%Y%m%d%H%M%S')}.xml"
+    with open(filename, "w") as f:
+        f.write(xml)
+    messagebox.showinfo("Exported", f"XML invoice saved to:\n{filename}")
+
+def export_pdf():
+    data = {k: v.get() for k, v in fields.items()}
+    filename = export_invoice_pdf(data)
+    messagebox.showinfo("Exported", f"PDF invoice saved to:\n{filename}")
+
+def export_excel():
+    data = {k: v.get() for k, v in fields.items()}
+    filename = export_invoice_excel(data)
+    messagebox.showinfo("Exported", f"Excel invoice saved to:\n{filename}")
+
+tk.Label(col3, text="--- Actions ---", font=("Arial", 12, "bold")).grid(row=0, column=0, pady=10)
+tk.Button(col3, text="💾 Save Invoice", command=save_invoice, width=25).grid(row=1, column=0, pady=5)
+tk.Button(col3, text="📤 Submit Invoice", command=submit_invoice, width=25).grid(row=2, column=0, pady=5)
+tk.Button(col3, text="🧾 Export XML", command=export_xml, width=25).grid(row=3, column=0, pady=5)
+tk.Button(col3, text="🖨️ Export PDF", command=export_pdf, width=25).grid(row=4, column=0, pady=5)
+tk.Button(col3, text="📊 Export Excel", command=export_excel, width=25).grid(row=5, column=0, pady=5)
+
+root.mainloop()

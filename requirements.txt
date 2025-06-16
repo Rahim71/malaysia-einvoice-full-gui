@@ -1,5 +1,7 @@
 tk
 requests
-flask
-fpdf
-lxml
+python-dotenv
+qrcode
+reportlab
+openpyxl
+flask          # for dummy_server only
